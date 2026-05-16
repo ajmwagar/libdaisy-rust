@@ -36,6 +36,7 @@ const PLL3_P_HZ: Hertz = Hertz::from_raw(AUDIO_SAMPLE_HZ.raw() * 256);
 
 pub struct System {
     pub gpio: crate::gpio::GPIO,
+    pub patch_sm_cv_out: crate::patch_sm::PatchSmCvOut,
     pub audio: audio::Audio,
     pub exti: stm32::EXTI,
     pub syscfg: stm32::SYSCFG,
@@ -214,6 +215,12 @@ impl System {
             &mut core.SCB,
         );
 
+        let patch_sm_cv_out = crate::patch_sm::PatchSmCvOut::new(
+            device.DAC,
+            (gpioa.pa4, gpioa.pa5),
+            ccdr.peripheral.DAC12,
+        );
+
         // Setup GPIOs
         let gpio = crate::gpio::GPIO::init(
             gpioc.pc7,
@@ -240,8 +247,8 @@ impl System {
             Some(gpioa.pa6),
             Some(gpioc.pc1),
             Some(gpioc.pc4),
-            Some(gpioa.pa5),
-            Some(gpioa.pa4),
+            None,
+            None,
             Some(gpioa.pa1),
             Some(gpioa.pa0),
             Some(gpiod.pd11),
@@ -271,6 +278,7 @@ impl System {
 
         System {
             gpio,
+            patch_sm_cv_out,
             audio,
             exti: device.EXTI,
             syscfg: device.SYSCFG,
