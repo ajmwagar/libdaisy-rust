@@ -44,7 +44,7 @@ pub struct System {
     pub adc2: adc::Adc<stm32::ADC2, adc::Disabled>,
     pub timer2: Timer<TIM2>,
     pub sdram: &'static mut [f32],
-    pub flash: crate::flash::Flash,
+    pub flash: Option<crate::flash::Flash>,
 }
 
 impl System {
@@ -105,6 +105,8 @@ impl System {
         );
 
         Self::init_debug(&mut core.DCB, &mut core.DWT);
+        let vtor = core.SCB.vtor.read();
+        let booting_from_qspi = (0x9000_0000..0x9080_0000).contains(&vtor);
 
         // Timers
         let mut timer2 = device.TIM2.timer(
@@ -199,30 +201,15 @@ impl System {
         )
         .into();
 
-        info!("Setup up Audio...");
-        let audio = Audio::new(
-            device.DMA1,
-            ccdr.peripheral.DMA1,
-            device.SAI1,
-            ccdr.peripheral.SAI1,
-            gpioe.pe2,
-            gpioe.pe3,
-            gpioe.pe4,
-            gpioe.pe5,
-            gpioe.pe6,
-            &ccdr.clocks,
-            &mut core.MPU,
-            &mut core.SCB,
-        );
-
-        let patch_sm_cv_out = crate::patch_sm::PatchSmCvOut::new(
+        let mut patch_sm_cv_out = crate::patch_sm::PatchSmCvOut::new(
             device.DAC,
             (gpioa.pa4, gpioa.pa5),
             ccdr.peripheral.DAC12,
         );
+        patch_sm_cv_out.write(crate::patch_sm::CvOutChannel::Two, 5.0);
 
         // Setup GPIOs
-        let gpio = crate::gpio::GPIO::init(
+        let mut gpio = crate::gpio::GPIO::init(
             gpioc.pc7,
             gpiob.pb11,
             Some(gpiob.pb12),
@@ -257,24 +244,46 @@ impl System {
             Some(gpiob.pb14),
             Some(gpiob.pb15),
         );
+        gpio.led.set_high();
+
+        info!("Setup up Audio...");
+        let audio = Audio::new(
+            device.DMA1,
+            ccdr.peripheral.DMA1,
+            device.SAI1,
+            ccdr.peripheral.SAI1,
+            gpioe.pe2,
+            gpioe.pe3,
+            gpioe.pe4,
+            gpioe.pe5,
+            gpioe.pe6,
+            &ccdr.clocks,
+            &mut core.MPU,
+            &mut core.SCB,
+        );
 
         // Setup cache
         Self::init_cache(&mut core.SCB, &mut core.CPUID);
 
         info!("System init done!");
 
-        //setup flash
-        let flash = crate::flash::Flash::new(
-            device.QUADSPI,
-            ccdr.peripheral.QSPI,
-            &ccdr.clocks,
-            gpiof.pf6,
-            gpiof.pf7,
-            gpiof.pf8,
-            gpiof.pf9,
-            gpiof.pf10,
-            gpiog.pg6,
-        );
+        // libDaisy skips QSPI init when the program itself is executing from
+        // QSPI. Reconfiguring that peripheral under a BOOT_QSPI app can fault.
+        let flash = if booting_from_qspi {
+            None
+        } else {
+            Some(crate::flash::Flash::new(
+                device.QUADSPI,
+                ccdr.peripheral.QSPI,
+                &ccdr.clocks,
+                gpiof.pf6,
+                gpiof.pf7,
+                gpiof.pf8,
+                gpiof.pf9,
+                gpiof.pf10,
+                gpiog.pg6,
+            ))
+        };
 
         System {
             gpio,

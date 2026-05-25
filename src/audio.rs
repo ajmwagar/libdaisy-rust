@@ -199,8 +199,10 @@ impl Audio {
 
         info!("Setup up SAI...");
         let sai1_rec = sai1_p.kernel_clk_mux(SAI1SEL_A::Pll3P);
-        let master_config = I2SChanConfig::new(I2SDir::Tx).set_frame_sync_active_high(true);
-        let slave_config = I2SChanConfig::new(I2SDir::Rx)
+        // Patch.SM/libDaisy uses SAI1 A as master receive and SAI1 B as
+        // slave transmit: PE6 = SA/RX, PE3 = SB/TX.
+        let master_config = I2SChanConfig::new(I2SDir::Rx).set_frame_sync_active_high(true);
+        let slave_config = I2SChanConfig::new(I2SDir::Tx)
             .set_sync_type(I2SSync::Internal)
             .set_frame_sync_active_high(true);
 
@@ -223,19 +225,15 @@ impl Audio {
         );
 
         input_stream.start(|_sai1_rb| {
-            sai.enable_dma(SaiChannel::ChannelB);
+            sai.enable_dma(SaiChannel::ChannelA);
         });
 
-        output_stream.start(|sai1_rb| {
-            sai.enable_dma(SaiChannel::ChannelA);
-
-            // wait until sai1's fifo starts to receive data
-            info!("Sai1 fifo waiting to receive data.");
-            while sai1_rb.cha().sr.read().flvl().is_empty() {}
-            info!("Audio started!");
+        output_stream.start(|_sai1_rb| {
+            sai.enable_dma(SaiChannel::ChannelB);
             sai.enable();
             sai.try_send(0, 0).unwrap();
         });
+        info!("Audio started!");
         let input = Input::new(DmaBufferRawRef {
             ptr: &raw mut RX_BUFFER,
         });
